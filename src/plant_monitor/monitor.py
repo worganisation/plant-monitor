@@ -15,6 +15,7 @@ from pydantic import ValidationError
 
 from plant_monitor.config import ChannelSettings, ChannelState, Settings
 from plant_monitor.discovery import base_topic, channel_topic, discovery_payload
+from plant_monitor.display import Display
 
 if TYPE_CHECKING:
     from grow.pump import Pump
@@ -37,6 +38,8 @@ class Monitor:
         self.refresh = Event()
         self.commands: Queue[tuple[int, str, bytes, float]] = Queue(maxsize=16)
         self.sensors = {channel: Moisture(channel) for channel in range(1, 4)}
+        self.display = Display()
+        self.last_readings: dict[int, tuple[float, float]] = {}
         self.pumps: dict[int, Pump] = {}
         self.next_watering = 0.0
         self.topics = {
@@ -129,8 +132,8 @@ class Monitor:
             f"{base_topic(self.settings)}/availability", "online", qos=1, retain=True
         )
 
-    def publish_readings(self) -> None:
-        """Read each sensor once; let HA expire readings when pulses stop."""
+    def read_sensors(self) -> None:
+        """Share each sample between MQTT and the screen, including while offline."""
         for channel, sensor in self.sensors.items():
             if not sensor.new_data:
                 continue
@@ -140,17 +143,18 @@ class Monitor:
                 continue
 
             config = self.state.channels[channel - 1]
-            moisture = 100 * (config.dry_point - frequency) / (config.dry_point - config.wet_point)
-            self.client.publish(
-                f"{channel_topic(self.settings, channel)}/state",
-                dumps(
-                    {
-                        "frequency": round(frequency, 3),
-                        "moisture": round(max(0, min(100, moisture)), 2),
-                    }
-                ),
-                qos=0,
+            saturation = (
+                100 * (config.dry_point - frequency) / (config.dry_point - config.wet_point)
             )
+            moisture = round(max(0, min(100, saturation)), 2)
+            self.last_readings[channel] = (moisture, monotonic())
+
+            if self.client.is_connected():
+                self.client.publish(
+                    f"{channel_topic(self.settings, channel)}/state",
+                    dumps({"frequency": round(frequency, 3), "moisture": moisture}),
+                    qos=0,
+                )
 
     def apply_command(self, channel: int, action: str, payload: bytes, received: float) -> None:
         """Validate an edit or bounded watering request before applying it."""
@@ -210,6 +214,7 @@ class Monitor:
         self.client.connect_async(self.settings.mqtt_host, self.settings.mqtt_port, keepalive=30)
         self.client.loop_start()
         next_reading = monotonic() + 5
+        next_screen = 0.0
 
         try:
             while not self.stopping.is_set():
@@ -218,9 +223,18 @@ class Monitor:
                         self.refresh.clear()
                         self.publish_configuration()
 
-                    if monotonic() >= next_reading:
-                        self.publish_readings()
-                        next_reading = monotonic() + self.settings.publish_interval
+                if monotonic() >= next_reading:
+                    self.read_sensors()
+                    next_reading = monotonic() + self.settings.publish_interval
+
+                if monotonic() >= next_screen:
+                    current = {
+                        channel: value
+                        for channel, (value, sampled_at) in self.last_readings.items()
+                        if monotonic() - sampled_at < self.settings.publish_interval * 3
+                    }
+                    self.display.update(self.state, current, self.client.is_connected())
+                    next_screen = monotonic() + 1
 
                 try:
                     command = self.commands.get(timeout=0.2)
@@ -244,6 +258,7 @@ class Monitor:
             finally:
                 self.client.disconnect()
                 self.client.loop_stop()
+                self.display.close()
 
 
 def main() -> None:

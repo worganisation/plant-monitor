@@ -4,6 +4,8 @@ Grow HAT monitoring and MQTT controls for GrowPi. One Python process owns the th
 
 Channel IDs and MQTT topics stay fixed when a plant is renamed. Names and calibration persist in `/var/lib/plant-monitor/channels.json`; back up that file along with the protected `.env`. Sensor readings expire when pulses stop. Watering commands must be live, finite and positive, and cannot exceed `MAX_WATER_SECONDS` (five seconds by default).
 
+The Grow HAT's 160 × 80 pixel screen shows one plant at a time, rotating through the three channels every five seconds. Each page has the plant name, a large moisture percentage and a small MQTT connection status. Names follow edits from Home Assistant; long labels are shortened to fit. Missing or expired readings show `--`. The screen refreshes every second using the same samples as MQTT, and local readings continue while the broker is offline. The backlight switches off when the service stops. Screen failures are logged without interrupting monitoring; restart the service after fixing display access. The HAT buttons do not operate the pumps.
+
 ## Development
 
 Install Python 3.14, uv, just and prek, then run:
@@ -30,6 +32,8 @@ MAX_WATER_SECONDS=5
 ```
 
 `PUBLISH_INTERVAL` defaults to 30 seconds. The systemd unit sets `STATE_FILE=/var/lib/plant-monitor/channels.json` and creates the state directory with the service user's ownership. Channels start as Channel 1–3; set their names and calibration through the discovered Home Assistant controls.
+
+For the screen, enable SPI in `/boot/firmware/config.txt` with `dtparam=spi=on` and free channel 2's sensor pin with `dtoverlay=spi0-cs,cs0_pin=14`, then reboot. The service user needs the `spi` and `gpio` groups. The display uses `/dev/spidev0.1`, GPIO 9 for data/command and GPIO 12 for its backlight.
 
 ```fish
 just sync
