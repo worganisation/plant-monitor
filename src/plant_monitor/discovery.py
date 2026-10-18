@@ -13,6 +13,41 @@ def channel_topic(settings: Settings, channel: int) -> str:
     return f"{base_topic(settings)}/channel_{channel}"
 
 
+def hat_discovery_payload(settings: Settings) -> dict[str, object]:
+    """Describe the HAT's shared ambient-light and raw proximity sensors."""
+    identifier = f"{settings.device_id}_grow_hat"
+    components: dict[str, dict[str, object]] = {
+        "illuminance": {
+            "name": "Ambient light",
+            "device_class": "illuminance",
+            "unit_of_measurement": "lx",
+        },
+        "proximity": {"name": "Proximity", "icon": "mdi:hand-wave"},
+    }
+    for metric, component in components.items():
+        component.update(
+            platform="sensor",
+            unique_id=f"{identifier}_{metric}",
+            default_entity_id=f"sensor.{identifier}_{metric}",
+            state_topic=f"{base_topic(settings)}/hat/state",
+            value_template=f"{{{{ value_json.{metric} }}}}",
+            state_class="measurement",
+            expire_after=int(settings.publish_interval * 3),
+        )
+
+    return {
+        "device": {
+            "identifiers": [identifier],
+            "name": f"{settings.device_id} Grow HAT",
+            "manufacturer": "Pimoroni",
+            "model": "Grow HAT Mini",
+        },
+        "origin": {"name": "plant-monitor"},
+        "components": components,
+        "availability_topic": f"{base_topic(settings)}/availability",
+    }
+
+
 def discovery_payload(
     settings: Settings, channel: int, config: ChannelSettings
 ) -> dict[str, object]:

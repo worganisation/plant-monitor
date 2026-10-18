@@ -3,6 +3,7 @@
 import logging
 import math
 import signal
+from collections import deque
 from json import dumps
 from queue import Empty, Full, Queue
 from threading import Event
@@ -14,10 +15,17 @@ from paho.mqtt.enums import CallbackAPIVersion, MQTTErrorCode
 from pydantic import ValidationError
 
 from plant_monitor.config import ChannelSettings, ChannelState, Settings
-from plant_monitor.discovery import base_topic, channel_topic, discovery_payload
+from plant_monitor.discovery import (
+    base_topic,
+    channel_topic,
+    discovery_payload,
+    hat_discovery_payload,
+)
+from plant_monitor.display import HISTORY_SAMPLES, Display
 
 if TYPE_CHECKING:
     from grow.pump import Pump
+    from ltr559 import LTR559
     from paho.mqtt.client import ConnectFlags
     from paho.mqtt.properties import Properties
     from paho.mqtt.reasoncodes import ReasonCode
@@ -37,6 +45,19 @@ class Monitor:
         self.refresh = Event()
         self.commands: Queue[tuple[int, str, bytes, float]] = Queue(maxsize=16)
         self.sensors = {channel: Moisture(channel) for channel in range(1, 4)}
+        self.display = Display()
+        self.ambient_sensor: LTR559 | None = None
+        try:
+            from ltr559 import LTR559
+
+            self.ambient_sensor = LTR559()
+        except ImportError, OSError, RuntimeError:
+            LOGGER.exception("Unable to initialise the LTR-559; check I2C access and restart")
+
+        self.last_readings: dict[int, tuple[float, float]] = {}
+        self.history: dict[int, deque[float | None]] = {
+            channel: deque(maxlen=HISTORY_SAMPLES) for channel in self.sensors
+        }
         self.pumps: dict[int, Pump] = {}
         self.next_watering = 0.0
         self.topics = {
@@ -108,6 +129,13 @@ class Monitor:
 
     def publish_configuration(self) -> None:
         """Publish discovery and the persisted values, including on HA restart."""
+        self.client.publish(
+            f"homeassistant/device/{self.settings.device_id}_grow_hat/config",
+            dumps(hat_discovery_payload(self.settings)),
+            qos=1,
+            retain=True,
+        )
+
         for channel, config in enumerate(self.state.channels, start=1):
             identifier = f"{self.settings.device_id}_plant_channel_{channel}"
             self.client.publish(
@@ -129,26 +157,56 @@ class Monitor:
             f"{base_topic(self.settings)}/availability", "online", qos=1, retain=True
         )
 
-    def publish_readings(self) -> None:
-        """Read each sensor once; let HA expire readings when pulses stop."""
+    def read_sensors(self) -> None:
+        """Share each sample between MQTT and the screen, including while offline."""
         for channel, sensor in self.sensors.items():
             if not sensor.new_data:
+                self.history[channel].append(None)
                 continue
 
             frequency = float(sensor.moisture)
             if not math.isfinite(frequency) or frequency <= 0:
+                self.history[channel].append(None)
                 continue
 
             config = self.state.channels[channel - 1]
-            moisture = 100 * (config.dry_point - frequency) / (config.dry_point - config.wet_point)
+            saturation = (
+                100 * (config.dry_point - frequency) / (config.dry_point - config.wet_point)
+            )
+            moisture = round(max(0, min(100, saturation)), 2)
+            self.last_readings[channel] = (moisture, monotonic())
+            self.history[channel].append(moisture)
+
+            if self.client.is_connected():
+                self.client.publish(
+                    f"{channel_topic(self.settings, channel)}/state",
+                    dumps({"frequency": round(frequency, 3), "moisture": moisture}),
+                    qos=0,
+                )
+
+        self.read_ambient_sensor()
+
+    def read_ambient_sensor(self) -> None:
+        """Publish the shared HAT readings without interrupting moisture monitoring."""
+        if self.ambient_sensor is None:
+            return
+
+        try:
+            self.ambient_sensor.update_sensor()
+            illuminance = float(self.ambient_sensor.get_lux(passive=True))
+            proximity = int(self.ambient_sensor.get_proximity(passive=True))
+        except OSError, RuntimeError:
+            LOGGER.exception("Unable to read the LTR-559; retrying at the next sample")
+            return
+
+        if not math.isfinite(illuminance) or illuminance < 0 or proximity < 0:
+            LOGGER.warning("Ignoring invalid LTR-559 readings")
+            return
+
+        if self.client.is_connected():
             self.client.publish(
-                f"{channel_topic(self.settings, channel)}/state",
-                dumps(
-                    {
-                        "frequency": round(frequency, 3),
-                        "moisture": round(max(0, min(100, moisture)), 2),
-                    }
-                ),
+                f"{base_topic(self.settings)}/hat/state",
+                dumps({"illuminance": round(illuminance, 2), "proximity": proximity}),
                 qos=0,
             )
 
@@ -210,6 +268,7 @@ class Monitor:
         self.client.connect_async(self.settings.mqtt_host, self.settings.mqtt_port, keepalive=30)
         self.client.loop_start()
         next_reading = monotonic() + 5
+        next_screen = 0.0
 
         try:
             while not self.stopping.is_set():
@@ -218,12 +277,23 @@ class Monitor:
                         self.refresh.clear()
                         self.publish_configuration()
 
-                    if monotonic() >= next_reading:
-                        self.publish_readings()
-                        next_reading = monotonic() + self.settings.publish_interval
+                if monotonic() >= next_reading:
+                    self.read_sensors()
+                    next_reading = monotonic() + self.settings.publish_interval
+
+                if self.display.poll_buttons() or monotonic() >= next_screen:
+                    current = {
+                        channel: value
+                        for channel, (value, sampled_at) in self.last_readings.items()
+                        if monotonic() - sampled_at < self.settings.publish_interval * 3
+                    }
+                    self.display.update(
+                        self.state, current, self.client.is_connected(), self.history
+                    )
+                    next_screen = monotonic() + 1
 
                 try:
-                    command = self.commands.get(timeout=0.2)
+                    command = self.commands.get(timeout=0.05)
                 except Empty:
                     continue
 
@@ -244,6 +314,7 @@ class Monitor:
             finally:
                 self.client.disconnect()
                 self.client.loop_stop()
+                self.display.close()
 
 
 def main() -> None:
