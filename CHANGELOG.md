@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.1.1 (2026-10-18)
+
+### Bug Fixes
+
+- Declare display numpy dependency ([#197](https://github.com/worganisation/plant-monitor/pull/197),
+  [`9aaad5a`](https://github.com/worganisation/plant-monitor/commit/9aaad5adc38a974fc0104da1b47280f4585b8cec))
+
+
 ## v1.1.0 (2026-10-18)
 
 ### Chores
