@@ -4,6 +4,8 @@ Grow HAT monitoring and MQTT controls for GrowPi. One Python process owns the th
 
 Channel IDs and MQTT topics stay fixed when a plant is renamed. Names and calibration persist in `/var/lib/plant-monitor/channels.json`; back up that file along with the protected `.env`. Sensor readings expire when pulses stop. Watering commands must be live, finite and positive, and cannot exceed `MAX_WATER_SECONDS` (five seconds by default).
 
+Home Assistant also discovers a shared Grow HAT device with the LTR-559's ambient light in lux and raw proximity reading. Higher proximity values indicate a closer object; they are not a distance measurement. Both update at `PUBLISH_INTERVAL` (30 seconds by default) and expire after three intervals without a successful reading. I2C read failures are logged and retried at the next sample without interrupting moisture monitoring. If sensor initialisation fails, fix I2C access and restart the service.
+
 The Grow HAT's 160 × 80 pixel screen starts with a three-column moisture overview inspired by [Pimoroni's monitor demo](https://learn.pimoroni.com/article/assembling-grow). It rotates every five seconds between that overview and the three plant pages, each showing the plant's name, moisture percentage and a small history graph. History contains the last 60 samples (30 minutes at the default interval), stays in memory and leaves gaps for missing readings. Names follow edits from Home Assistant; long labels are shortened to fit. Missing or expired readings show `--`. A green/orange dot at the right indicates MQTT connected/disconnected. Local readings continue while the broker is offline.
 
 The screen shows button hints beside the four HAT buttons: **A** advances to the next page, **B** goes back, **X** returns to the three-column overview, and **Y** pauses/resumes automatic rotation. Navigating manually pauses rotation so the selected page stays visible. The buttons control only the display; calibration and watering use the Home Assistant controls. The screen refreshes every second and on button presses. Shutdown switches off the backlight. Display or button failures are logged without interrupting monitoring; restart the service after fixing hardware access.
@@ -37,6 +39,8 @@ MAX_WATER_SECONDS=5
 
 For the screen, enable SPI in `/boot/firmware/config.txt` with `dtparam=spi=on` and free channel 2's sensor pin with `dtoverlay=spi0-cs,cs0_pin=14`, then reboot. The service user needs the `spi` and `gpio` groups. The display uses `/dev/spidev0.1`, GPIO 9 for data/command and GPIO 12 for its backlight.
 
+For light and proximity, enable I2C with `dtparam=i2c_arm=on` in the same file and add the service user to the `i2c` group, then reboot. The LTR-559 uses address `0x23` on `/dev/i2c-1`.
+
 ```fish
 just sync
 just install
@@ -58,3 +62,5 @@ Deployment refuses a dirty checkout, fetches the requested tag, stops the servic
 ## MQTT
 
 Discovery is retained under `homeassistant/device/growpi_plant_channel_<N>/config`. State and commands use `/homeassistant/growpi/plant_monitor/channel_<N>/...`; availability uses `/homeassistant/growpi/plant_monitor/availability`. Name and calibration edits are acknowledged by retained state after they are saved locally. Discovery and subscriptions refresh on reconnect and Home Assistant startup.
+
+The HAT sensors use retained discovery at `homeassistant/device/growpi_grow_hat/config` and publish non-retained JSON with `illuminance` and `proximity` at `/homeassistant/growpi/plant_monitor/hat/state`. They share the monitor's availability topic. These examples use the default `DEVICE_ID=growpi`.
