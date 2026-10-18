@@ -12,7 +12,7 @@ python = "^3.11"
 wg-utilities = {extras = ["exceptions"], version = "*"}
 font-roboto = "^0.0.1"
 fonts = "^0.0.3"
-pillow = "^10.3.0"
+pillow = ">=10.3,<13.0"
 paho-mqtt = "^1.6.1"
 python-dotenv = "^1.0.1"
 growhat = { platform = "linux", version = "*" }
