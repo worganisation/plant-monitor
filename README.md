@@ -37,9 +37,9 @@ MAX_WATER_SECONDS=5
 
 `PUBLISH_INTERVAL` defaults to 30 seconds. The systemd unit sets `STATE_FILE=/var/lib/plant-monitor/channels.json` and creates the state directory with the service user's ownership. Channels start as Channel 1–3; set their names and calibration through the discovered Home Assistant controls.
 
-For the screen, enable SPI in `/boot/firmware/config.txt` with `dtparam=spi=on` and free channel 2's sensor pin with `dtoverlay=spi0-cs,cs0_pin=14`, then reboot. The service user needs the `spi` and `gpio` groups. The display uses `/dev/spidev0.1`, GPIO 9 for data/command and GPIO 12 for its backlight.
+For the screen, enable SPI in `/boot/firmware/config.txt` with `dtparam=spi=on` and free channel 2's sensor pin and the display's data/command pin with `dtoverlay=spi0-2cs,cs0_pin=14,no_miso`, then reboot. The service user needs the `spi` and `gpio` groups. The display uses `/dev/spidev0.1`, GPIO 9 for data/command and GPIO 12 for its backlight.
 
-For light and proximity, enable I2C with `dtparam=i2c_arm=on` in the same file and add the service user to the `i2c` group, then reboot. The LTR-559 uses address `0x23` on `/dev/i2c-1`.
+For light and proximity, run `sudo raspi-config nonint do_i2c 0` to enable I2C and load its device module, and add the service user to the `i2c` group, then reboot. The LTR-559 uses address `0x23` on `/dev/i2c-1`.
 
 ```fish
 just sync
