@@ -1,6 +1,6 @@
 [project]
 name = "plant-monitor"
-version = "1.0.0"
+version = "1.1.0"
 description = "Grow HAT plant monitoring and MQTT controls"
 readme = "README.md"
 requires-python = ">=3.14"
