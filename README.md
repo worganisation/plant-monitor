@@ -14,7 +14,7 @@ prek install
 just run
 ```
 
-Hardware dependencies install on ARM64 Linux. The GPIO backend is `rpi-lgpio`, which provides the Grow HAT driver’s `RPi.GPIO` API on current kernels. Building its `lgpio` dependency requires `swig` and the compiler toolchain on the Pi (`sudo apt install swig build-essential`). Running the monitor requires the actual Grow HAT libraries and GPIO access; it does not substitute simulated readings when hardware is missing. CI runs prek, Ruff and basedpyright. Renovate manages dependencies using the shared worganisation preset.
+Hardware dependencies install on ARM64 Linux. The GPIO backend is `rpi-lgpio`, which provides the Grow HAT driver’s `RPi.GPIO` API on current kernels. Building its `lgpio` dependency requires `swig`, `liblgpio-dev` and the compiler toolchain on the Pi (`sudo apt install swig liblgpio-dev build-essential`). Running the monitor requires the actual Grow HAT libraries and GPIO access; it does not substitute simulated readings when hardware is missing. CI runs prek, Ruff and basedpyright. Renovate manages dependencies using the shared worganisation preset.
 
 ## GrowPi setup
 
