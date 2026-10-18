@@ -3,6 +3,7 @@
 import logging
 import math
 import signal
+from collections import deque
 from json import dumps
 from queue import Empty, Full, Queue
 from threading import Event
@@ -15,7 +16,7 @@ from pydantic import ValidationError
 
 from plant_monitor.config import ChannelSettings, ChannelState, Settings
 from plant_monitor.discovery import base_topic, channel_topic, discovery_payload
-from plant_monitor.display import Display
+from plant_monitor.display import HISTORY_SAMPLES, Display
 
 if TYPE_CHECKING:
     from grow.pump import Pump
@@ -40,6 +41,9 @@ class Monitor:
         self.sensors = {channel: Moisture(channel) for channel in range(1, 4)}
         self.display = Display()
         self.last_readings: dict[int, tuple[float, float]] = {}
+        self.history: dict[int, deque[float | None]] = {
+            channel: deque(maxlen=HISTORY_SAMPLES) for channel in self.sensors
+        }
         self.pumps: dict[int, Pump] = {}
         self.next_watering = 0.0
         self.topics = {
@@ -136,10 +140,12 @@ class Monitor:
         """Share each sample between MQTT and the screen, including while offline."""
         for channel, sensor in self.sensors.items():
             if not sensor.new_data:
+                self.history[channel].append(None)
                 continue
 
             frequency = float(sensor.moisture)
             if not math.isfinite(frequency) or frequency <= 0:
+                self.history[channel].append(None)
                 continue
 
             config = self.state.channels[channel - 1]
@@ -148,6 +154,7 @@ class Monitor:
             )
             moisture = round(max(0, min(100, saturation)), 2)
             self.last_readings[channel] = (moisture, monotonic())
+            self.history[channel].append(moisture)
 
             if self.client.is_connected():
                 self.client.publish(
@@ -227,17 +234,19 @@ class Monitor:
                     self.read_sensors()
                     next_reading = monotonic() + self.settings.publish_interval
 
-                if monotonic() >= next_screen:
+                if self.display.poll_buttons() or monotonic() >= next_screen:
                     current = {
                         channel: value
                         for channel, (value, sampled_at) in self.last_readings.items()
                         if monotonic() - sampled_at < self.settings.publish_interval * 3
                     }
-                    self.display.update(self.state, current, self.client.is_connected())
+                    self.display.update(
+                        self.state, current, self.client.is_connected(), self.history
+                    )
                     next_screen = monotonic() + 1
 
                 try:
-                    command = self.commands.get(timeout=0.2)
+                    command = self.commands.get(timeout=0.05)
                 except Empty:
                     continue
 
