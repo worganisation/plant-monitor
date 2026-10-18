@@ -1,0 +1,26 @@
+---
+name: Prek Hooks
+
+on:
+  merge_group:
+  push:
+    branches:
+      - main
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+concurrency:
+  group: 'prek-hooks-${{ github.ref }}'
+  cancel-in-progress: true
+
+jobs:
+  prek:
+    name: Prek Hooks
+    uses: worganisation/github-config-files/.github/workflows/__prek-hooks.yml@0.10.0
+    with:
+      python-version: '3.14'
+    secrets: inherit

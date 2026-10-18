@@ -1,0 +1,42 @@
+---
+name: Deploy Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release tag to deploy
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: plant-monitor-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
+    environment: production-deploy
+    runs-on: [self-hosted, linux, x64, cc, iac, opentofu]
+    timeout-minutes: 15
+    steps:
+      - name: Set up LAN SSH
+        id: ssh
+        uses: worganisation/github-config-files/actions/lan-ssh@ff2bdafb7120c951c6dfa6d968e1e4a69b9092ec
+        with:
+          private-key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          known-hosts: ${{ vars.DEPLOY_SSH_KNOWN_HOSTS }}
+      - name: Deploy to GrowPi
+        env:
+          TAG: ${{ inputs.tag || github.event.release.tag_name }}
+          SSH_CONFIG: ${{ steps.ssh.outputs.config }}
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+          ssh -F "$SSH_CONFIG" worgarside@10.0.0.53 \
+            "cd /home/worgarside/plant-monitor && just deploy '$TAG'"
