@@ -11,7 +11,7 @@ packages = [{include = "plant_monitor"}]
 python = "^3.11"
 wg-utilities = {extras = ["exceptions"], version = "*"}
 font-roboto = "^0.0.1"
-fonts = "^0.0.3"
+fonts = ">=0.0.3,<0.1.1"
 pillow = "^10.3.0"
 paho-mqtt = "^1.6.1"
 python-dotenv = "^1.0.1"
