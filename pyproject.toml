@@ -10,7 +10,7 @@ dependencies = [
     "paho-mqtt>=2.1.0",
     "pydantic-settings>=2.12",
     "growhat>=0.0.3; sys_platform == 'linux' and platform_machine == 'aarch64'",
-    "rpi-gpio>=0.7.1; sys_platform == 'linux' and platform_machine == 'aarch64'",
+    "rpi-lgpio>=0.6; sys_platform == 'linux' and platform_machine == 'aarch64'",
 ]
 
 [dependency-groups]
