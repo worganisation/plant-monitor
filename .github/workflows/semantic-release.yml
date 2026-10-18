@@ -1,0 +1,35 @@
+---
+name: Semantic Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      force-deployment:
+        description: >-
+          Version component to force, or auto to use semantic commit parsing.
+        required: false
+        type: choice
+        default: auto
+        options:
+          - auto
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+concurrency:
+  group: semantic-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release
+    if: >-
+      github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    uses: worganisation/github-config-files/.github/workflows/__semantic-release.yml@0.10.0
+    with:
+      python-version: '3.14'
+      force-deployment: ${{ inputs.force-deployment != 'auto' && inputs.force-deployment || '' }}
+    secrets: inherit

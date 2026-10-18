@@ -1,0 +1,20 @@
+[Unit]
+Description=Grow HAT plant monitoring and MQTT controls
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=@SERVICE_USER@
+WorkingDirectory=@REPO_DIR@
+EnvironmentFile=@REPO_DIR@/.env
+Environment=PYTHONPATH=@REPO_DIR@/src
+Environment=STATE_FILE=/var/lib/plant-monitor/channels.json
+StateDirectory=plant-monitor
+ExecStart=@REPO_DIR@/.venv/bin/python -m plant_monitor
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

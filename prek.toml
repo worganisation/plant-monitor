@@ -1,0 +1,39 @@
+#:schema https://www.schemastore.org/prek.json
+default_language_version = { python = "python3.14" }
+default_install_hook_types = ["commit-msg", "pre-commit"]
+
+[[repos]]
+repo = "https://github.com/compilerla/conventional-pre-commit"
+rev = "v4.4.0"
+hooks = [{id = "conventional-pre-commit", stages = ["commit-msg"]}]
+
+[[repos]]
+repo = "https://github.com/astral-sh/uv-pre-commit"
+rev = "0.12.5"
+hooks = [{id = "uv-lock"}]
+
+[[repos]]
+repo = "https://github.com/pre-commit/pre-commit-hooks"
+rev = "v6.0.0"
+hooks = [
+  {id = "check-added-large-files"},
+  {id = "check-merge-conflict"},
+  {id = "end-of-file-fixer"},
+  {id = "trailing-whitespace"},
+  {id = "check-toml"},
+  {id = "check-json"},
+]
+
+[[repos]]
+repo = "https://github.com/astral-sh/ruff-pre-commit"
+rev = "v0.16.3"
+hooks = [{id = "ruff-check", args = ["--fix"]}, {id = "ruff-format"}]
+
+[[repos]]
+repo = "https://github.com/rhysd/actionlint"
+rev = "v1.7.12"
+hooks = [{id = "actionlint"}]
+
+[[repos]]
+repo = "local"
+hooks = [{id = "basedpyright", name = "basedpyright", entry = "uv run --frozen basedpyright", language = "system", pass_filenames = false, files = '^(src/|tests/|pyproject\.toml$)'}]

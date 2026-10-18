@@ -21,7 +21,7 @@ concurrency:
 jobs:
   manage-pr-labels:
     name: Manage PR Labels
-    uses: worgarside/github-config-files/.github/workflows/__manage_pr_labels.yml@main
+    uses: worganisation/github-config-files/.github/workflows/__manage-pr-labels.yml@0.10.0
     permissions:
       contents: read
       pull-requests: write
@@ -33,7 +33,7 @@ jobs:
 
   close-empty-pr:
     name: Close Empty PR
-    uses: worgarside/github-config-files/.github/workflows/__close_empty_pr.yml@main
+    uses: worganisation/github-config-files/.github/workflows/__close-empty-pr.yml@0.10.0
     if: github.event.pull_request.state == 'open'
     permissions:
       contents: read

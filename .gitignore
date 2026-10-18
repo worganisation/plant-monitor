@@ -344,3 +344,6 @@ custom_components
 
 resources/gh_cli/
 .github_token
+
+!renovate.json
+!.python-version

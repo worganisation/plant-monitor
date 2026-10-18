@@ -3,22 +3,19 @@ name: Auto-Create PR
 
 on:
   push:
-    branches:
-      - feature/*
-      - bugfix/*
-      - chore/*
-      - hotfix/*
-      - refactor/*
+    branches-ignore:
+      - main
+      - dependabot/**
+  workflow_dispatch:
 
 jobs:
   create-pr:
     name: Create PR
     # yamllint disable-line rule:line-length
-    uses: worgarside/github-config-files/.github/workflows/__create_pull_request.yml@main
+    uses: worganisation/github-config-files/.github/workflows/__create-pull-request.yml@0.10.0
     with:
       base-ref-name: ${{ github.event.repository.default_branch }}
       head-ref-name: ${{ github.ref_name }}
-      pr-title: ${{ github.event.head_commit.message }}
       pr-draft: true
       update-pr-body-if-exists: true
     secrets: inherit
