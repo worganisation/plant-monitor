@@ -6,10 +6,14 @@ function escape(text) {
   return String(text).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
 }
 
-/** Render GitHub changelog headings, bullets and GitHub links for Slack. */
+/** Render the changelog for Slack, keeping PR links and omitting duplicate release metadata. */
 function notes(body) {
-  return escape(body || '').replace(/^#{1,6} (.+)$/gm, '*$1*')
+  return escape(body || '').split(/\n---\s*\n+\*\*Detailed Changes\*\*:/i)[0]
+    .replace(/^## v?\d+\.\d+\.\d+[^\n]*$/gm, '')
+    .replace(/, \[`[a-f0-9]+`\]\(https:\/\/github\.com\/[^\s)]+\/commit\/[a-f0-9]+\)/gi, '')
+    .replace(/^#{1,6} (.+)$/gm, '*$1*').replace(/\*\*([^*\n]+)\*\*/g, '*$1*')
     .replace(/^[-*] /gm, '• ').replace(/\[([^\]\n]+)\]\((https:\/\/github\.com\/[^\s)<>]+)\)/g, '<$2|$1>')
+    .replace(/^(\*[^*\n]+\*)\n\n(?=•)/gm, '$1\n').trim()
 }
 
 /** Send a Slack request and surface API errors without logging credentials. */
@@ -70,9 +74,10 @@ function stageReply(run, job, step) {
   const failed = step ? [] : (job.steps || []).filter(item => item.conclusion === 'failure')
   const details = failed.map(item => escape(item.name)).join(', ')
   const title = step ? step.name : job.name
-  const text = '*' + escape(title) + ' — ' + escape(stage.conclusion) + '*'
+  const outcomes = { success: 'completed', failure: 'failed', cancelled: 'was cancelled', skipped: 'was skipped', timed_out: 'timed out' }
+  const text = '*' + escape(title) + '* ' + (outcomes[stage.conclusion] || escape(stage.conclusion)) + '.'
     + (details ? '\nFailed step: ' + details : '')
-    + '\n<' + (job.html_url || run.html_url) + '|' + escape(run.name) + ' · attempt ' + run.run_attempt + '>'
+    + '\n<' + (job.html_url || run.html_url) + '|View workflow log>'
   return { key: 'run-' + run.id + '-' + digest, text, skipped: stage.conclusion === 'skipped' }
 }
 
@@ -123,16 +128,18 @@ module.exports = async function report({ github, context, core }) {
     replies = outcome.replies
   } else if (context.eventName === 'repository_dispatch') {
     const payload = event.client_payload
+    const product = repo.repo === 'home-assistant' ? 'Home Assistant' : 'AppDaemon'
+    const version = 'v' + payload?.tag
     const messages = {
-      checked_out: 'Release checked out',
-      skipped: 'Checkout skipped on the selected branch',
-      failed: 'Release checkout failed',
+      checked_out: product + ' checked out ' + version + '.',
+      skipped: product + ' stayed on the selected branch. Version ' + version + ' was skipped.',
+      failed: product + ' could not check out ' + version + '.',
     }
     if (repo.repo === 'home-assistant') {
-      messages.ha_started = 'Home Assistant started'
-      messages.automations_reloaded = 'Home Assistant automations reloaded'
+      messages.ha_started = 'Home Assistant started with ' + version + '.'
+      messages.automations_reloaded = 'Home Assistant reloaded its automations with ' + version + '.'
     } else if (repo.repo === 'home-assistant-appdaemon') {
-      messages.app_runtime = 'AppDaemon process sampled with checkout'
+      messages.app_runtime = '*AppDaemon is online*'
     } else {
       throw new Error('Unexpected checkout reporter')
     }
@@ -145,19 +152,18 @@ module.exports = async function report({ github, context, core }) {
     if (!['skipped', 'failed'].includes(payload.status)) {
       const { data: commit } = await github.rest.repos.getCommit({ ...repo, ref: tag })
       if (commit.sha !== payload.sha) throw new Error('Reported checkout does not match the release commit')
-      message += ' at `' + commit.sha.slice(0, 12) + '`'
       if (payload.status !== 'checked_out') key = payload.status
     }
     if (payload.status === 'app_runtime') {
       if (![payload.active, payload.inactive].every(count => Number.isSafeInteger(count) && count >= 0)) {
         throw new Error('Invalid AppDaemon runtime counts')
       }
-      message += ' — ' + payload.active + ' active apps, ' + payload.inactive + ' inactive'
+      message += '\n' + payload.active + (payload.active === 1 ? ' app active' : ' apps active') + ' · ' + payload.inactive + ' inactive'
       const apps = payload.initialized
       if (!Array.isArray(apps) || !apps.every(app => typeof app === 'string')) {
         throw new Error('Invalid AppDaemon initialized apps')
       }
-      if (apps.length) message += '\nObserved app initialization: ' + apps.map(escape).join(', ')
+      if (apps.length) message += '\nStarted after the update: ' + apps.map(app => escape(app.replaceAll('_', ' '))).join(', ')
     }
     replies.push({ key, text: message })
   }
@@ -176,9 +182,10 @@ module.exports = async function report({ github, context, core }) {
   }
   if (!release) throw new Error('No published release for ' + tag)
   if (release.immutable) throw new Error('Release is immutable; cannot persist Slack thread receipt')
-  const heading = '*<' + release.html_url + '|' + escape(repo.repo + ' ' + tag) + '>*'
+  const names = { 'home-assistant': 'Home Assistant', 'home-assistant-appdaemon': 'AppDaemon' }
+  const heading = '*<' + release.html_url + '|' + escape(names[repo.repo] || repo.repo) + ' ' + escape(tag) + '>*'
   const body = notes(release.body)
-  const parent = await publish(github, repo, release, 'release', heading + (body ? '\n' + body.slice(0, 35000) : ''))
+  const parent = await publish(github, repo, release, 'release', heading + (body ? '\n\n' + body.slice(0, 35000) : ''))
   for (const reply of replies) {
     if (reply.skipped && !release.assets.some(asset => asset.name === 'slack-' + reply.key + '.json')) continue
     await publish(github, repo, release, reply.key, reply.text, parent)
