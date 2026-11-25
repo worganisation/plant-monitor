@@ -8,8 +8,8 @@ function escape(text) {
 
 /** Render the changelog for Slack, keeping PR links and omitting duplicate release metadata. */
 function notes(body) {
-  return escape(body || '').split(/\n---\s*\n+\*\*Detailed Changes\*\*:/i)[0]
-    .replace(/^## v?\d+\.\d+\.\d+[^\n]*$/gm, '')
+  const [changelog] = escape(body || '').replaceAll('\r\n', '\n').split('\n---\n\n**Detailed Changes**:', 1)
+  return changelog.split('\n').filter(line => !/^## v?\d+\.\d+\.\d+\b/.test(line)).join('\n')
     .replace(/, \[`[a-f0-9]+`\]\(https:\/\/github\.com\/[^\s)]+\/commit\/[a-f0-9]+\)/gi, '')
     .replace(/^#{1,6} (.+)$/gm, '*$1*').replace(/\*\*([^*\n]+)\*\*/g, '*$1*')
     .replace(/^[-*] /gm, '• ').replace(/\[([^\]\n]+)\]\((https:\/\/github\.com\/[^\s)<>]+)\)/g, '<$2|$1>')
