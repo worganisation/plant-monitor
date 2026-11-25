@@ -1,0 +1,32 @@
+---
+name: Release notifications
+
+on:
+  release:
+    types: [published]
+  repository_dispatch:
+    types: [release-checkout]
+  workflow_run:
+    workflows:
+      - Deploy
+      - Deploy release
+      - Deploy Release
+      - Deploy Authentik release
+      - Deploy VSMP Release
+      - Deploy MtrxPi Release
+      - Deploy infrastructure release
+      - Semantic Release
+      - 'CI: Validation & Deployment'
+      - Sync Repos
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  notify:
+    name: Report release
+    uses: worganisation/github-config-files/.github/workflows/__release-notifications.yml@0.12.0
+    secrets:
+      SLACK_RELEASE_BOT_TOKEN: ${{ secrets.SLACK_RELEASE_BOT_TOKEN }}
