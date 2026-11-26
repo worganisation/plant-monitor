@@ -6,14 +6,68 @@ function escape(text) {
   return String(text).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
 }
 
-/** Render the changelog for Slack, keeping PR links and omitting duplicate release metadata. */
-function notes(body) {
-  const [changelog] = escape(body || '').replaceAll('\r\n', '\n').split('\n---\n\n**Detailed Changes**:', 1)
-  return changelog.split('\n').filter(line => !/^## v?\d+\.\d+\.\d+\b/.test(line)).join('\n')
-    .replace(/, \[`[a-f0-9]+`\]\(https:\/\/github\.com\/[^\s)]+\/commit\/[a-f0-9]+\)/gi, '')
-    .replace(/^#{1,6} (.+)$/gm, '*$1*').replace(/\*\*([^*\n]+)\*\*/g, '*$1*')
-    .replace(/^[-*] /gm, '• ').replace(/\[([^\]\n]+)\]\((https:\/\/github\.com\/[^\s)<>]+)\)/g, '<$2|$1>')
-    .replace(/^(\*[^*\n]+\*)\n\n(?=•)/gm, '$1\n').trim()
+const sectionEmoji = {
+  'breaking changes': ':rotating_light:', 'bug fixes': ':bug:', 'build system': ':hammer:',
+  chores: ':gear:', 'code style': ':lipstick:', 'continuous integration': ':gear:',
+  dependencies: ':package:', deps: ':package:', documentation: ':book:', features: ':sparkles:',
+  performance: ':zap:', 'performance improvements': ':zap:', refactoring: ':recycle:',
+  style: ':lipstick:', testing: ':white_check_mark:',
+}
+
+/** Format personal release metadata and changelog entries as Slack Block Kit sections. */
+function announcement(repo, release) {
+  const products = { 'home-assistant': 'Home Assistant', 'home-assistant-appdaemon': 'AppDaemon' }
+  const version = release.tag_name.replace(/^v?(?=\d)/, 'v')
+  const product = process.env.SLACK_PRODUCT_NAME?.trim() || products[repo.repo] || repo.repo
+  const emoji = process.env.RELEASE_MESSAGE_TITLE_EMOJI?.trim()
+  const title = [emoji, product, version, 'is here!'].filter(Boolean).join(' ')
+  const blocks = [{ type: 'header', text: { type: 'plain_text', text: title.slice(0, 150), emoji: true } }]
+
+  /** Wrap formatted content in a Slack section. */
+  function section(text) {
+    return { type: 'section', text: { type: 'mrkdwn', text } }
+  }
+
+  const releaseLink = 'The full release notes can be found <' + release.html_url + '|here>.'
+  blocks.push(section(releaseLink), { type: 'divider' })
+  const [changelog] = (release.body || '').replaceAll('\r\n', '\n').split(/\n---\s*\n\*\*Detailed Changes\*\*:/, 1)
+  const lines = changelog.replace(/\n[ \t]+(?=\S)/g, ' ').split('\n')
+  let heading = ''
+  let chunk = ''
+  for (const raw of lines) {
+    const line = raw.trim()
+    if (!line || /^## v?\d+\.\d+\.\d+\b/.test(line) || /^_This release is published under .* License\._$/.test(line)) continue
+
+    const category = /^#{1,6}\s+(.+)$/.exec(line)
+    if (category) {
+      if (chunk) blocks.push(section(chunk))
+      chunk = ''
+      heading = (sectionEmoji[category[1].toLowerCase()] || ':tada:') + ' *' + escape(category[1]) + '*'
+      continue
+    }
+
+    const bullet = /^[-*] /.test(line)
+    if (bullet && /\b(?:pre-commit|prek)\s+autoupdate/i.test(line)) continue
+    let entry = escape(line.replace(/^[-*] (?:\*\*[^*]+\*\*:\s*)?/, ''))
+      .replace(/\[`?([^\]`\n]+)`?\]\((https:\/\/github\.com\/[^\s)<>|]+)\)/g, '<$2|$1>')
+      .replace(/\*\*([^*\n]+)\*\*/g, '*$1*')
+    if (bullet) entry = '• ' + entry
+
+    if (chunk && chunk.length + entry.length + 1 > 2900) {
+      blocks.push(section(chunk))
+      chunk = ''
+    }
+    if (heading) {
+      chunk = heading.slice(0, 2800)
+      heading = ''
+    }
+    const remaining = 2900 - chunk.length - (chunk ? 1 : 0)
+    if (entry.length > remaining) entry = entry.slice(0, remaining - 1).replace(/<[^>]*$/, '') + '…'
+    chunk += (chunk ? '\n' : '') + entry
+  }
+  if (chunk) blocks.push(section(chunk))
+
+  return { text: escape(title) + '\n' + releaseLink, blocks: blocks.slice(0, 50) }
 }
 
 /** Send a Slack request and surface API errors without logging credentials. */
@@ -39,7 +93,7 @@ async function slack(method, payload) {
 }
 
 /** Create a message once per release asset or update the recorded Slack message on retry. */
-async function publish(github, repo, release, key, text, thread) {
+async function publish(github, repo, release, key, message, thread) {
   const name = 'slack-' + key + '.json'
   const channel = process.env.SLACK_CHANNEL
   const asset = release.assets.find(item => item.name === name)
@@ -49,14 +103,14 @@ async function publish(github, repo, release, key, text, thread) {
     })
     const saved = JSON.parse(Buffer.from(data).toString())
     if (saved.channel !== channel || !/^\d+\.\d+$/.test(saved.ts)) throw new Error('Invalid Slack thread receipt')
-    await slack('chat.update', { channel, ts: saved.ts, text, unfurl_links: false, unfurl_media: false })
+    await slack('chat.update', { channel, ts: saved.ts, ...message, unfurl_links: false, unfurl_media: false })
     return saved.ts
   }
 
   const id = createHash('sha256').update(repo.owner + '/' + repo.repo + '/' + release.id + '/' + key).digest('hex')
   const clientId = [id.slice(0, 8), id.slice(8, 12), '4' + id.slice(13, 16), '8' + id.slice(17, 20), id.slice(20, 32)].join('-')
   const posted = await slack('chat.postMessage', {
-    channel, text, thread_ts: thread, client_msg_id: clientId, unfurl_links: false, unfurl_media: false,
+    channel, ...message, thread_ts: thread, client_msg_id: clientId, unfurl_links: false, unfurl_media: false,
   })
   await github.rest.repos.uploadReleaseAsset({
     ...repo, release_id: release.id, name,
@@ -182,13 +236,11 @@ module.exports = async function report({ github, context, core }) {
   }
   if (!release) throw new Error('No published release for ' + tag)
   if (release.immutable) throw new Error('Release is immutable; cannot persist Slack thread receipt')
-  const names = { 'home-assistant': 'Home Assistant', 'home-assistant-appdaemon': 'AppDaemon' }
-  const heading = '*<' + release.html_url + '|' + escape(names[repo.repo] || repo.repo) + ' ' + escape(tag) + '>*'
-  const body = notes(release.body)
-  const parent = await publish(github, repo, release, 'release', heading + (body ? '\n\n' + body.slice(0, 35000) : ''))
+  const message = announcement(repo, release)
+  const parent = await publish(github, repo, release, 'release', message)
   for (const reply of replies) {
     if (reply.skipped && !release.assets.some(asset => asset.name === 'slack-' + reply.key + '.json')) continue
-    await publish(github, repo, release, reply.key, reply.text, parent)
+    await publish(github, repo, release, reply.key, { text: reply.text }, parent)
   }
   core.info('Reported ' + repo.repo + ' ' + tag)
 }
