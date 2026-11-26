@@ -1,4 +1,6 @@
 const { createHash } = require('node:crypto')
+const { readFile } = require('node:fs/promises')
+const { join } = require('node:path')
 const { setTimeout: sleep } = require('node:timers/promises')
 
 /** Escape text before adding it to Slack markup. */
@@ -135,6 +137,29 @@ function stageReply(run, job, step) {
   return { key: 'run-' + run.id + '-' + digest, text, skipped: stage.conclusion === 'skipped' }
 }
 
+/**
+ * Append downstream PR links from the completed sync attempt's artifact.
+ * @param {string} directory Artifact download directory.
+ * @param {string} text Sync outcome and workflow log link.
+ * @returns {Promise<string>} Slack text with the downstream PR results.
+ */
+async function syncReply(directory, text) {
+  const urls = JSON.parse(await readFile(join(directory, 'sync-prs.json'), 'utf8'))
+  if (!Array.isArray(urls)) throw new Error('Invalid repo sync PR list')
+
+  const links = []
+  for (const url of [...new Set(urls)].sort()) {
+    const match = /^https:\/\/github\.com\/((?:worganisation|worgarside)\/[\w.-]+)\/pull\/(\d+)$/i.exec(url)
+    if (!match) throw new Error('Invalid repo sync PR URL')
+
+    links.push('• <' + url + '|' + match[1] + ' #' + match[2] + '>')
+  }
+
+  return text + (links.length
+    ? '\n\n:arrows_counterclockwise: *Downstream pull requests*\n' + links.join('\n')
+    : '\n\nNo downstream pull requests were needed.')
+}
+
 /** Identify the release and material jobs from a completed workflow attempt. */
 async function workflowOutcome(github, repo, run) {
   const { data: latest } = await github.rest.actions.getWorkflowRun({ ...repo, run_id: run.id })
@@ -163,7 +188,11 @@ async function workflowOutcome(github, repo, run) {
       const publication = /^(?:publish|push) (?:.* )?(?:image|package|wheel|artifact)s?\b/i.test(step.name)
       if (embeddedBuild || publication) replies.push(stageReply(run, job, step))
     }
-    replies.push(stageReply(run, job))
+    const reply = stageReply(run, job)
+    if (run.name === 'Sync Repos' && job.name === 'Sync Repos' && process.env.SYNC_LINKS_DIR) {
+      reply.text = await syncReply(process.env.SYNC_LINKS_DIR, reply.text)
+    }
+    replies.push(reply)
   }
   if (!material.length) replies.push(stageReply(run, { name: run.name, conclusion: run.conclusion }))
   return { tag, replies }
