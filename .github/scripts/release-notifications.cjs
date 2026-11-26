@@ -138,26 +138,27 @@ function stageReply(run, job, step) {
 }
 
 /**
- * Append downstream PR links from the completed sync attempt's artifact.
- * @param {string} directory Artifact download directory.
- * @param {string} text Sync outcome and workflow log link.
- * @returns {Promise<string>} Slack text with the downstream PR results.
+ * Format downstream PR links for the sync job's Slack reply.
+ * @param {string|undefined} directory Artifact download directory, when available.
+ * @returns {Promise<string>} Slack text to append to the sync reply.
  */
-async function syncReply(directory, text) {
+async function syncDetails(directory) {
+  if (!directory) return ''
+
   const urls = JSON.parse(await readFile(join(directory, 'sync-prs.json'), 'utf8'))
   if (!Array.isArray(urls)) throw new Error('Invalid repo sync PR list')
 
   const links = []
-  for (const url of [...new Set(urls)].sort()) {
+  for (const url of [...new Set(urls)].sort((a, b) => a.localeCompare(b))) {
     const match = /^https:\/\/github\.com\/((?:worganisation|worgarside)\/[\w.-]+)\/pull\/(\d+)$/i.exec(url)
     if (!match) throw new Error('Invalid repo sync PR URL')
 
     links.push('• <' + url + '|' + match[1] + ' #' + match[2] + '>')
   }
 
-  return text + (links.length
+  return links.length
     ? '\n\n:arrows_counterclockwise: *Downstream pull requests*\n' + links.join('\n')
-    : '\n\nNo downstream pull requests were needed.')
+    : '\n\nNo downstream pull requests were needed.'
 }
 
 /** Identify the release and material jobs from a completed workflow attempt. */
@@ -188,13 +189,11 @@ async function workflowOutcome(github, repo, run) {
       const publication = /^(?:publish|push) (?:.* )?(?:image|package|wheel|artifact)s?\b/i.test(step.name)
       if (embeddedBuild || publication) replies.push(stageReply(run, job, step))
     }
-    const reply = stageReply(run, job)
-    if (run.name === 'Sync Repos' && job.name === 'Sync Repos' && process.env.SYNC_LINKS_DIR) {
-      reply.text = await syncReply(process.env.SYNC_LINKS_DIR, reply.text)
-    }
-    replies.push(reply)
+    replies.push(stageReply(run, job))
   }
   if (!material.length) replies.push(stageReply(run, { name: run.name, conclusion: run.conclusion }))
+  // Sync Repos has one material job, so its artifact describes the first reply.
+  replies[0].text += await syncDetails(process.env.SYNC_LINKS_DIR)
   return { tag, replies }
 }
 
