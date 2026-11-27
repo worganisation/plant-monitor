@@ -27,6 +27,6 @@ permissions:
 jobs:
   notify:
     name: Report release
-    uses: worganisation/github-config-files/.github/workflows/__release-notifications.yml@0.14.0
+    uses: worganisation/github-config-files/.github/workflows/__release-notifications.yml@0.14.2
     secrets:
       SLACK_RELEASE_BOT_TOKEN: ${{ secrets.SLACK_RELEASE_BOT_TOKEN }}
