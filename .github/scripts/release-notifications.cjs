@@ -57,6 +57,14 @@ async function releaseCopy(notes, core) {
   return { headline, highlights: validPoints ? points.map(item => item.trim().replace(/\s+/g, ' ')) : [] }
 }
 
+const sectionEmoji = {
+  'breaking changes': '🚨', 'bug fixes': '🐛', 'build system': '🔨',
+  chores: '⚙️', 'code style': '💄', 'continuous integration': '⚙️',
+  dependencies: '📦', deps: '📦', documentation: '📖', features: '✨',
+  performance: '⚡', 'performance improvements': '⚡', refactoring: '♻️',
+  style: '💄', testing: '✅',
+}
+
 /**
  * Translate the headings, bullets, emphasis and links used in GitHub release notes to Slack markup.
  * @param {string} line One line of GitHub Markdown outside a fenced code block.
@@ -65,7 +73,11 @@ async function releaseCopy(notes, core) {
 function formatReleaseLine(line) {
   return escape(line)
     .replace(/^(\s*)[-*+]\s+/, '$1• ')
-    .replace(/^#{1,6}\s+(.+)$/, '*$1*')
+    .replace(/^#{1,6}\s+(.+)$/, (_, heading) => {
+      const category = heading.trim().toLowerCase()
+      const prefix = Object.hasOwn(sectionEmoji, category) ? sectionEmoji[category] + ' ' : ''
+      return prefix + '*' + heading + '*'
+    })
     .replace(/^---+\s*$/, '────────')
     .replace(/`[^`]*`|\[([^\]\n|]+)\]\((https?:\/\/[^\s)<>|]+)\)|\*\*/g, (match, label, url) => {
       if (url) return '<' + url + '|' + label.replace(/^`(.*)`$/, '$1') + '>'
